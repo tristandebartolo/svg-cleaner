@@ -10,7 +10,6 @@ interface PropertiesPanelProps {
 
 const READONLY_ATTRS = ["xmlns", "version", "xml:space"];
 const DEDICATED_ATTRS = ["id", "fill", "stroke", "stroke-width", "opacity", "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "x1", "y1", "x2", "y2"];
-const COMMON_EDITABLE = ["d", "transform", "class", "viewBox", ...DEDICATED_ATTRS];
 
 const NumberInput = ({ label, value, onChange, step = 1 }: { label: string, value: string, onChange: (val: string) => void, step?: number }) => {
    const num = parseFloat(value) || 0;
@@ -75,6 +74,8 @@ export default function PropertiesPanel({ nodes, mutate, onDelete }: PropertiesP
   const tagName = node ? node.tagName.toLowerCase() : '';
 
   const [attrs, setAttrs] = useState<Record<string, string>>({});
+  const [newKey, setNewKey] = useState('');
+  const [newVal, setNewVal] = useState('');
 
   useEffect(() => {
     refreshAttrs();
@@ -102,6 +103,10 @@ export default function PropertiesPanel({ nodes, mutate, onDelete }: PropertiesP
         if (newAttrs['width'] === undefined) newAttrs['width'] = '0';
         if (newAttrs['height'] === undefined) newAttrs['height'] = '0';
       }
+      if (tagName === 'rect') {
+        if (newAttrs['rx'] === undefined) newAttrs['rx'] = '';
+        if (newAttrs['ry'] === undefined) newAttrs['ry'] = '';
+      }
       if (tagName === 'circle' || tagName === 'ellipse') {
          if (newAttrs['cx'] === undefined) newAttrs['cx'] = '0';
          if (newAttrs['cy'] === undefined) newAttrs['cy'] = '0';
@@ -120,35 +125,61 @@ export default function PropertiesPanel({ nodes, mutate, onDelete }: PropertiesP
     setAttrs(newAttrs);
   };
 
-  const handleAttrChange = (name: string, val: string) => {
-    nodes.forEach(n => {
-        if (val === '') {
-          n.removeAttribute(name);
+const ATTR_HELP_DOCS: Record<string, string> = {
+  "class": "Classes CSS. Utile pour styliser cet élément.",
+  "transform": "Matrice de transformation (translate, rotate, scale...).",
+  "viewBox": "Définit le système de coordonnées et la vue.",
+  "preserveAspectRatio": "Gestion de la déformation (ex: xMidYMid meet).",
+  "data-id": "Identifiant de donnée personnalisé.",
+  "vector-effect": "ex: 'non-scaling-stroke' garde la taille du trait peu importe le zoom.",
+};
+
+  const handleAttrChange = (name: string, val: string | null) => {
+    try {
+      nodes.forEach(n => {
+          if (val === null || val === '') {
+            n.removeAttribute(name);
+          } else {
+            n.setAttribute(name, val);
+          }
+      });
+      
+      setAttrs(prev => {
+        const next = { ...prev };
+        if (val === null || val === '') {
+           delete next[name];
         } else {
-          n.setAttribute(name, val);
+           next[name] = val;
         }
-    });
-    
-    setAttrs(prev => ({ ...prev, [name]: val }));
-    
-    let type: HistoryEntry['type'] = 'style';
-    if (name === 'fill') type = 'color';
-    if (name === 'stroke' || name === 'stroke-width' || name === 'd') type = 'stroke';
-    if (['x', 'y', 'cx', 'cy'].includes(name)) type = 'move';
-    if (['width', 'height', 'r', 'rx', 'ry'].includes(name)) type = 'scale';
-    
-    const firstId = nodes[0].getAttribute('id') || nodes[0].tagName;
-    mutate(name === 'id' ? `Renommer` : `Attr ${name}`, type, firstId, name === 'fill' ? val : undefined);
+        return next;
+      });
+      
+      let type: HistoryEntry['type'] = 'style';
+      if (name === 'fill') type = 'color';
+      if (name === 'stroke' || name === 'stroke-width' || name === 'd') type = 'stroke';
+      if (['x', 'y', 'cx', 'cy'].includes(name)) type = 'move';
+      if (['width', 'height', 'r', 'rx', 'ry'].includes(name)) type = 'scale';
+      
+      const firstId = nodes[0].getAttribute('id') || nodes[0].tagName;
+      mutate(name === 'id' ? `Renommer` : `Attr ${name}`, type, firstId, name === 'fill' ? (val || undefined) : undefined);
+    } catch (e) {
+      console.error("Impossible de modifier cet attribut :", e);
+    }
   };
 
   const handleAddAttribute = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const key = fd.get('key') as string;
-    const val = fd.get('val') as string;
-    if (key && val) {
+    const key = newKey.trim();
+    const val = newVal.trim();
+
+    if (key) {
+      if (attrs[key] !== undefined) {
+        alert(`L'attribut "${key}" existe déjà.`);
+        return;
+      }
       handleAttrChange(key, val);
-      e.currentTarget.reset();
+      setNewKey('');
+      setNewVal('');
     }
   };
 
@@ -192,6 +223,13 @@ export default function PropertiesPanel({ nodes, mutate, onDelete }: PropertiesP
                 <NumberInput label="Y" value={attrs['y'] || ''} onChange={v => handleAttrChange('y', v)} step={10} />
                 <NumberInput label="Largeur" value={attrs['width'] || ''} onChange={v => handleAttrChange('width', v)} step={10} />
                 <NumberInput label="Hauteur" value={attrs['height'] || ''} onChange={v => handleAttrChange('height', v)} step={10} />
+                
+                {tagName === 'rect' && (
+                  <>
+                    <NumberInput label="Rayon X (rx)" value={attrs['rx'] || ''} onChange={v => handleAttrChange('rx', v)} step={1} />
+                    <NumberInput label="Rayon Y (ry)" value={attrs['ry'] || ''} onChange={v => handleAttrChange('ry', v)} step={1} />
+                  </>
+                )}
              </div>
           )}
 
@@ -265,9 +303,10 @@ export default function PropertiesPanel({ nodes, mutate, onDelete }: PropertiesP
           <div className="flex flex-col gap-2">
             {advancedKeys.map(k => {
                const isReadonly = READONLY_ATTRS.includes(k);
+               const helpText = ATTR_HELP_DOCS[k];
                return (
-                 <div key={k} className="flex border border-border rounded overflow-hidden group">
-                   <div className="bg-muted/50 px-2 py-1 text-xs font-mono text-muted-foreground border-r border-border min-w-[70px] flex items-center">
+                 <div key={k} className="flex border border-border rounded overflow-hidden group" title={helpText}>
+                   <div className="bg-muted/50 px-2 py-1 text-xs font-mono text-muted-foreground border-r border-border min-w-[70px] flex items-center shrink-0 max-w-[120px] truncate" title={helpText ? `${k} : ${helpText}` : k}>
                      {k}
                    </div>
                    <input 
@@ -275,11 +314,11 @@ export default function PropertiesPanel({ nodes, mutate, onDelete }: PropertiesP
                      value={attrs[k] || ''} 
                      readOnly={isReadonly}
                      onChange={e => handleAttrChange(k, e.target.value)} 
-                     className="bg-background flex-1 text-xs px-2 outline-none font-mono py-1.5 focus:bg-muted/10 transition-colors"
+                     className="bg-background flex-1 text-xs px-2 outline-none font-mono py-1.5 focus:bg-muted/10 transition-colors w-0"
                    />
                    {!isReadonly && (
                      <button 
-                       onClick={() => handleAttrChange(k, '')}
+                       onClick={() => handleAttrChange(k, null)}
                        className="px-2 text-destructive/50 hover:bg-destructive hover:text-destructive-foreground transition-colors border-l border-border opacity-0 group-hover:opacity-100"
                      >
                        <Trash2 className="w-3 h-3" />
@@ -295,12 +334,12 @@ export default function PropertiesPanel({ nodes, mutate, onDelete }: PropertiesP
         <form onSubmit={handleAddAttribute} className="bg-muted/10 p-3 rounded border border-dashed border-border/50 flex flex-col gap-2 mt-3">
           <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Nouvel Attribut</div>
           <div className="flex items-center gap-2">
-             <input type="text" name="key" required placeholder="nom (ex: class)" list="attr-suggestions" className="w-[80px] bg-background border border-border rounded px-2 py-1 text-xs font-mono outline-none focus:border-primary" />
-             <input type="text" name="val" required placeholder="valeur" className="flex-1 bg-background border border-border rounded px-2 py-1 text-xs font-mono outline-none focus:border-primary" />
-             <button type="submit" className="bg-secondary hover:bg-secondary/80 text-secondary-foreground p-1 rounded transition-colors"><Plus className="w-3.5 h-3.5" /></button>
+             <input type="text" name="key" value={newKey} onChange={e => setNewKey(e.target.value)} required placeholder="nom (ex: class)" list="attr-suggestions" className="w-[80px] bg-background border border-border rounded px-2 py-1 text-xs font-mono outline-none focus:border-primary shrink-0" />
+             <input type="text" name="val" value={newVal} onChange={e => setNewVal(e.target.value)} placeholder="valeur (optionnel)" className="flex-1 bg-background border border-border rounded px-2 py-1 text-xs font-mono outline-none focus:border-primary w-0" />
+             <button type="submit" className="bg-secondary hover:bg-secondary/80 text-secondary-foreground p-1 rounded transition-colors shrink-0"><Plus className="w-3.5 h-3.5" /></button>
           </div>
           <datalist id="attr-suggestions">
-            {COMMON_EDITABLE.map(opt => <option key={opt} value={opt} />)}
+            {Object.keys(ATTR_HELP_DOCS).map(opt => <option key={opt} value={opt} />)}
           </datalist>
         </form>
       </div>
