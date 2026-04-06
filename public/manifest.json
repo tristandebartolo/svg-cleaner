@@ -1,0 +1,17 @@
+{
+  "name": "SVG Cleaner & Editor",
+  "short_name": "SVG Cleaner",
+  "description": "Un outil magique pour nettoyer, optimiser et éditer vos fichiers SVG.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

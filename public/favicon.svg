@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#9333ea" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Fond -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  
+  <!-- Tracé (Path) -->
+  <!-- Ligne "sale" ou brouillon arrière -->
+  <path d="M 130 370 L 210 180 L 330 240 L 400 330" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" opacity="0.3" stroke-dasharray="8 12"/>
+  
+  <!-- Ligne nettoyée / parfaite en avant -->
+  <path d="M 130 370 L 210 180 L 330 240" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Noeuds Vectoriels (Anchor points) -->
+  <rect x="114" y="354" width="32" height="32" rx="8" fill="#ffffff" />
+  <rect x="194" y="164" width="32" height="32" rx="8" fill="#ffffff" />
+  <rect x="314" y="224" width="32" height="32" rx="8" fill="#ffffff" />
+  
+  <!-- Étincelles Magiques (Nettoyage) -->
+  <g filter="url(#glow)">
+    <path d="M 370 120 L 375 145 L 400 150 L 375 155 L 370 180 L 365 155 L 340 150 L 365 145 Z" fill="#fbbf24" />
+    <path d="M 430 220 L 433 234 L 447 237 L 433 240 L 430 254 L 427 240 L 413 237 L 427 234 Z" fill="#fbbf24" />
+    <path d="M 260 100 L 263 114 L 277 117 L 263 120 L 260 134 L 257 120 L 243 117 L 257 114 Z" fill="#fbbf24" opacity="0.8"/>
+  </g>
+</svg>
