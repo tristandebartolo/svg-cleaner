@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
-import { Undo2, Redo2, FlipHorizontal, FlipVertical, AlignLeft, AlignCenter, AlignRight, MousePointer2, Hand, PenLine, SquarePlus, FolderPlus, FolderMinus, GripVertical, Maximize2, RotateCw, Minus, Spline, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Undo2, Redo2, FlipHorizontal, FlipVertical, AlignLeft, AlignCenter, AlignRight, MousePointer2, Hand, PenLine, SquarePlus, FolderPlus, FolderMinus, GripVertical, Maximize2, RotateCw, Minus, Spline, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Square, Circle, Triangle } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { EditorMode, HistoryEntry } from './EditorLayout';
@@ -36,6 +36,8 @@ export default function Toolbar({ doc, selectedNodes, mutate, undo, redo, canUnd
   const [canScrollDown, setCanScrollDown] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const [shapesOpen, setShapesOpen] = useState(false);
 
   const checkScroll = useCallback(() => {
     if (scrollRef.current) {
@@ -347,13 +349,13 @@ export default function Toolbar({ doc, selectedNodes, mutate, undo, redo, canUnd
 
       {/* Scroll Up/Left Arrow */}
       {isVertical ? (
-         canScrollUp && <button onClick={() => scrollByAmount(0, -150)} className="p-0.5 mb-0.5 rounded-full hover:bg-muted shrink-0 text-muted-foreground transition-colors"><ChevronUp className="w-3.5 h-3.5"/></button>
+        canScrollUp && <button onClick={() => scrollByAmount(0, -150)} className="p-0.5 mb-0.5 rounded-full hover:bg-muted shrink-0 text-muted-foreground transition-colors"><ChevronUp className="w-3.5 h-3.5" /></button>
       ) : (
-         canScrollLeft && <button onClick={() => scrollByAmount(-150, 0)} className="p-0.5 mr-0.5 rounded-full hover:bg-muted shrink-0 text-muted-foreground transition-colors"><ChevronLeft className="w-3.5 h-3.5"/></button>
+        canScrollLeft && <button onClick={() => scrollByAmount(-150, 0)} className="p-0.5 mr-0.5 rounded-full hover:bg-muted shrink-0 text-muted-foreground transition-colors"><ChevronLeft className="w-3.5 h-3.5" /></button>
       )}
 
       {/* Scrollable Container */}
-      <div 
+      <div
         ref={scrollRef}
         onScroll={checkScroll}
         className={cn(
@@ -419,43 +421,25 @@ export default function Toolbar({ doc, selectedNodes, mutate, undo, redo, canUnd
 
           <Sep />
 
-          <div className={cn("flex gap-1 group relative shrink-0", isVertical ? "flex-col" : "flex-row items-center")}>
+          <div className={cn("flex gap-1 group relative shrink-0", isVertical ? "flex-col" : "flex-row items-center", shapesOpen && "bg-muted/80 rounded-lg border border-border/50")}>
             <button
-              onClick={() => handleAddShape('rect')}
+              onClick={() => setShapesOpen(!shapesOpen)}
               className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors flex items-center gap-1"
               title="Ajouter une forme"
             >
               <SquarePlus className="w-4 h-4" />
             </button>
-            {/* Simple hover dropdown pour les formes */}
-            <div className={cn(
-              "absolute bg-card border border-border rounded shadow-lg hidden group-hover:flex flex-col min-w-[120px] overflow-hidden z-50",
-              isVertical ? "left-full top-0 ml-1" : "top-full left-0 mt-1"
-            )}>
-              <button onClick={() => handleAddShape('rect')} className="px-3 py-2 text-sm text-left hover:bg-muted text-muted-foreground hover:text-foreground">Rectangle</button>
-              <button onClick={() => handleAddShape('circle')} className="px-3 py-2 text-sm text-left hover:bg-muted text-muted-foreground hover:text-foreground border-t border-border/50">Cercle</button>
-              <button onClick={() => handleAddShape('line')} className="px-3 py-2 text-sm text-left hover:bg-muted text-muted-foreground hover:text-foreground border-y border-border/50">Ligne</button>
-              <button onClick={() => handleAddShape('path')} className="px-3 py-2 text-sm text-left hover:bg-muted text-muted-foreground hover:text-foreground">Triangle (Path)</button>
-            </div>
-          </div>
 
-          <Sep />
-
-          <div className={cn("flex gap-1 shrink-0", isVertical ? "flex-col" : "flex-row items-center")}>
-            <button
-              onClick={handleGroupSelection} disabled={selectedNodes.length === 0}
-              className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent rounded transition-colors"
-              title="Grouper la sélection"
-            >
-              <FolderPlus className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleUngroupSelection} disabled={selectedNodes.every(n => n.tagName.toLowerCase() !== 'g')}
-              className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent rounded transition-colors"
-              title="Dégrouper la sélection"
-            >
-              <FolderMinus className="w-4 h-4" />
-            </button>
+            {/* Inline tools pour les formes */}
+            {shapesOpen && (
+              <div className={cn("flex gap-1", isVertical ? "flex-col" : "flex-row", "animate-in fade-in duration-200")}>
+                {isVertical ? <div className="h-px w-full bg-border/50 my-0.5" /> : <div className="w-px h-4 bg-border/50 mx-0.5 shrink-0" />}
+                <button onClick={() => { handleAddShape('rect'); setShapesOpen(false); }} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors" title="Rectangle"><Square className="w-4 h-4" /></button>
+                <button onClick={() => { handleAddShape('circle'); setShapesOpen(false); }} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors" title="Cercle"><Circle className="w-4 h-4" /></button>
+                <button onClick={() => { handleAddShape('line'); setShapesOpen(false); }} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors" title="Ligne"><Minus className="w-4 h-4" /></button>
+                <button onClick={() => { handleAddShape('path'); setShapesOpen(false); }} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors" title="Triangle (Path)"><Triangle className="w-4 h-4" /></button>
+              </div>
+            )}
           </div>
 
           <Sep />
@@ -477,46 +461,69 @@ export default function Toolbar({ doc, selectedNodes, mutate, undo, redo, canUnd
             </button>
           </div>
 
-          <Sep />
+          {selectedNodes.length > 0 && (
+            <>
+              <Sep />
 
-          <div className={cn("flex gap-1 shrink-0", isVertical ? "flex-col" : "flex-row items-center")}>
-            <button
-              onClick={handleFlipX} disabled={selectedNodes.length === 0}
-              className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent rounded transition-colors"
-              title="Symétrie Horizontale"
-            >
-              <FlipHorizontal className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleFlipY} disabled={selectedNodes.length === 0}
-              className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent rounded transition-colors"
-              title="Symétrie Verticale"
-            >
-              <FlipVertical className="w-4 h-4" />
-            </button>
-          </div>
+              <div className={cn("flex gap-1 shrink-0", isVertical ? "flex-col" : "flex-row items-center")}>
+                <button
+                  onClick={handleGroupSelection}
+                  className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors"
+                  title="Grouper la sélection"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleUngroupSelection} disabled={selectedNodes.every(n => n.tagName.toLowerCase() !== 'g')}
+                  className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent rounded transition-colors"
+                  title="Dégrouper la sélection"
+                >
+                  <FolderMinus className="w-4 h-4" />
+                </button>
+              </div>
 
-          <Sep />
+              <Sep />
 
-          <div className={cn("flex gap-1 shrink-0", isVertical ? "flex-col" : "flex-row items-center")}>
-            <button onClick={() => handleAlign('left')} disabled={selectedNodes.length === 0} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 rounded"><AlignLeft className="w-4 h-4" /></button>
-            <button onClick={() => handleAlign('center-x')} disabled={selectedNodes.length === 0} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 rounded" title="Centrer X"><AlignCenter className="w-4 h-4" /></button>
-            <button onClick={() => handleAlign('right')} disabled={selectedNodes.length === 0} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 rounded" title="Aligner Droite"><AlignRight className="w-4 h-4" /></button>
+              <div className={cn("flex gap-1 shrink-0", isVertical ? "flex-col" : "flex-row items-center")}>
+                <button
+                  onClick={handleFlipX}
+                  className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors"
+                  title="Symétrie Horizontale"
+                >
+                  <FlipHorizontal className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleFlipY}
+                  className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded transition-colors"
+                  title="Symétrie Verticale"
+                >
+                  <FlipVertical className="w-4 h-4" />
+                </button>
+              </div>
 
-            {isVertical ? <Sep /> : <div className="w-px h-4 bg-border/50 mx-1 shrink-0"></div>}
+              <Sep />
 
-            <button onClick={() => handleAlign('top')} disabled={selectedNodes.length === 0} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 rounded rotate-90" title="Aligner Haut"><AlignLeft className="w-4 h-4" /></button>
-            <button onClick={() => handleAlign('center-y')} disabled={selectedNodes.length === 0} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 rounded rotate-90" title="Centrer Y"><AlignCenter className="w-4 h-4" /></button>
-            <button onClick={() => handleAlign('bottom')} disabled={selectedNodes.length === 0} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 rounded rotate-90" title="Aligner Bas"><AlignRight className="w-4 h-4" /></button>
-          </div>
+              <div className={cn("flex gap-1 shrink-0", isVertical ? "flex-col" : "flex-row items-center")}>
+                <button onClick={() => handleAlign('left')} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded"><AlignLeft className="w-4 h-4" /></button>
+                <button onClick={() => handleAlign('center-x')} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded" title="Centrer X"><AlignCenter className="w-4 h-4" /></button>
+                <button onClick={() => handleAlign('right')} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded" title="Aligner Droite"><AlignRight className="w-4 h-4" /></button>
+
+                {isVertical ? <Sep /> : <div className="w-px h-4 bg-border/50 mx-1 shrink-0"></div>}
+
+                <button onClick={() => handleAlign('top')} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded rotate-90" title="Aligner Haut"><AlignLeft className="w-4 h-4" /></button>
+                <button onClick={() => handleAlign('center-y')} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded rotate-90" title="Centrer Y"><AlignCenter className="w-4 h-4" /></button>
+                <button onClick={() => handleAlign('bottom')} className="p-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded rotate-90" title="Aligner Bas"><AlignRight className="w-4 h-4" /></button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* Scroll Down/Right Arrow */}
       {isVertical ? (
-         canScrollDown && <button onClick={() => scrollByAmount(0, 150)} className="p-0.5 mt-0.5 rounded-full hover:bg-muted shrink-0 text-muted-foreground transition-colors"><ChevronDown className="w-3.5 h-3.5"/></button>
+        canScrollDown && <button onClick={() => scrollByAmount(0, 150)} className="p-0.5 mt-0.5 rounded-full hover:bg-muted shrink-0 text-muted-foreground transition-colors"><ChevronDown className="w-3.5 h-3.5" /></button>
       ) : (
-         canScrollRight && <button onClick={() => scrollByAmount(150, 0)} className="p-0.5 ml-0.5 rounded-full hover:bg-muted shrink-0 text-muted-foreground transition-colors"><ChevronRight className="w-3.5 h-3.5"/></button>
+        canScrollRight && <button onClick={() => scrollByAmount(150, 0)} className="p-0.5 ml-0.5 rounded-full hover:bg-muted shrink-0 text-muted-foreground transition-colors"><ChevronRight className="w-3.5 h-3.5" /></button>
       )}
 
     </div>

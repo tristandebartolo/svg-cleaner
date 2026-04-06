@@ -484,7 +484,7 @@ export default function EditorLayout({ item, onClose, onSave, onNameChange }: Ed
               )}
             </div>
           </div>
-          <div className="p-2 flex-1">
+          <div className="p-0 flex-1">
             <LayerTree
               doc={doc}
               root={doc.documentElement}
