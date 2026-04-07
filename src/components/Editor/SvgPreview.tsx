@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { EditorMode, HistoryEntry } from './EditorLayout';
 import type { TransformOrigin } from './TransformOriginPanel';
 import { ZoomIn, ZoomOut } from 'lucide-react';
-import { parsePath, serializePath, getPathPoints, absolutize, insertPointInPath, type PathPoint, type PathCommand } from '../../utils/pathUtils';
+import { parsePath, serializePath, getPathPoints, absolutize, insertPointInPath, getHandleLines, convertSegmentToCurve, convertSegmentToLine, convertSegmentToQuadCurve, type PathPoint, type PathCommand } from '../../utils/pathUtils';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -64,6 +64,7 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
   const containerRef = useRef<HTMLDivElement>(null);
   const [highlightBox, setHighlightBox] = useState<{top: number, left: number, width: number, height: number} | null>(null);
   const [pathPoints, setPathPoints] = useState<PathPoint[]>([]);
+  const [screenHandleLines, setScreenHandleLines] = useState<{ax: number; ay: number; cx: number; cy: number}[]>([]);
 
   const editingCommandsRef = useRef<PathCommand[]>([]);
   const draggedPointIndexRef = useRef<number | null>(null);
@@ -99,6 +100,11 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
   const nodeMapRef = useRef<Map<Element, Element>>(new Map());
   const lastDocRef = useRef<Document | null>(null);
 
+  const projectToScreen = useCallback((sx: number, sy: number, ctm: DOMMatrix, containerRect: DOMRect, z: number) => {
+    const pt = new DOMPoint(sx, sy).matrixTransform(ctm);
+    return { x: (pt.x - containerRect.left) / z, y: (pt.y - containerRect.top) / z };
+  }, []);
+
   const computeScreenPoints = useCallback((commands: PathCommand[], visualPathEl: SVGGraphicsElement): PathPoint[] => {
     if (!containerRef.current) return [];
     const ctm = visualPathEl.getScreenCTM();
@@ -107,10 +113,24 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
     const points = getPathPoints(commands);
     const z = zoomRef.current;
     return points.map(p => {
-      const pt = new DOMPoint(p.x, p.y).matrixTransform(ctm);
-      return { ...p, x: (pt.x - containerRect.left) / z, y: (pt.y - containerRect.top) / z };
+      const s = projectToScreen(p.x, p.y, ctm, containerRect, z);
+      return { ...p, x: s.x, y: s.y };
     });
-  }, []);
+  }, [projectToScreen]);
+
+  const computeScreenHandles = useCallback((commands: PathCommand[], visualPathEl: SVGGraphicsElement) => {
+    if (!containerRef.current) return [];
+    const ctm = visualPathEl.getScreenCTM();
+    if (!ctm) return [];
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const z = zoomRef.current;
+    const handles = getHandleLines(commands);
+    return handles.map(h => {
+      const a = projectToScreen(h.ax, h.ay, ctm, containerRect, z);
+      const c = projectToScreen(h.cx, h.cy, ctm, containerRect, z);
+      return { ax: a.x, ay: a.y, cx: c.x, cy: c.y };
+    });
+  }, [projectToScreen]);
 
   // PERF: updateHighlight reads from refs — no deps that change frequently
   const updateHighlight = useCallback(() => {
@@ -156,13 +176,15 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
         const visualPathEl = realSelectedNodesRef.current[0] as SVGGraphicsElement;
         if (visualPathEl) {
           setPathPoints(computeScreenPoints(commands, visualPathEl));
+          setScreenHandleLines(computeScreenHandles(commands, visualPathEl));
         }
       }
     } else if (currentMode !== 'edit_path') {
       setPathPoints([]);
+      setScreenHandleLines([]);
       editingCommandsRef.current = [];
     }
-  }, [computeScreenPoints]);
+  }, [computeScreenPoints, computeScreenHandles]);
 
   // PERF: Update selection mapping from nodeMap without walking the DOM
   const updateSelectionMapping = useCallback(() => {
@@ -347,7 +369,7 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
         const previewPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         previewPath.setAttribute('d', buildPathD([svgPt]));
         previewPath.setAttribute('fill', 'none');
-        previewPath.setAttribute('stroke', '#3b82f6');
+        previewPath.setAttribute('stroke', '#80f63bff');
         previewPath.setAttribute('stroke-width', '2');
         previewPath.setAttribute('stroke-dasharray', '6 3');
         previewPath.setAttribute('stroke-linecap', 'round');
@@ -688,6 +710,7 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
       visualPathEl.setAttribute('d', newD);
       selectedNodes[0].setAttribute('d', newD);
       setPathPoints(computeScreenPoints(newCommands, visualPathEl));
+      setScreenHandleLines(computeScreenHandles(newCommands, visualPathEl));
       return;
     }
 
@@ -785,6 +808,43 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
 
   const onPathNodePointerDown = (e: React.PointerEvent, pointIndex: number) => {
     e.stopPropagation();
+
+    // Alt+click: convert segment L↔C (Alt+Shift: L↔Q)
+    if (e.altKey && selectedNodes.length === 1) {
+      const commands = editingCommandsRef.current;
+      const points = getPathPoints(commands);
+      const point = points[pointIndex];
+      if (!point || point.isControlPoint) return; // Only convert on anchor points
+
+      const cmd = commands[point.cmdIndex];
+      const upper = cmd.type.toUpperCase();
+      let newCommands: PathCommand[];
+
+      if (upper === 'L' || upper === 'H' || upper === 'V') {
+        // Convert to curve
+        newCommands = e.shiftKey
+          ? convertSegmentToQuadCurve(commands, point.cmdIndex)
+          : convertSegmentToCurve(commands, point.cmdIndex);
+      } else if (upper === 'C' || upper === 'Q') {
+        // Convert back to line
+        newCommands = convertSegmentToLine(commands, point.cmdIndex);
+      } else {
+        return;
+      }
+
+      editingCommandsRef.current = newCommands;
+      const newD = serializePath(newCommands);
+      const visualPathEl = realSelectedNodesRef.current[0] as SVGGraphicsElement;
+      if (visualPathEl) {
+        visualPathEl.setAttribute('d', newD);
+        selectedNodes[0].setAttribute('d', newD);
+        setPathPoints(computeScreenPoints(newCommands, visualPathEl));
+        setScreenHandleLines(computeScreenHandles(newCommands, visualPathEl));
+        mutate('Convertir segment', 'stroke', selectedNodes[0].id || undefined);
+      }
+      return;
+    }
+
     draggedPointIndexRef.current = pointIndex;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
@@ -792,6 +852,28 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
   const handleZoomIn = () => setZoom(z => Math.min(10, z * 1.2));
   const handleZoomOut = () => setZoom(z => Math.max(0.1, z / 1.2));
   const handleResetPanZoom = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
+  // ── Zoom Shortcuts ──
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if ((e.target as HTMLElement).isContentEditable) return;
+
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        handleZoomIn();
+      } else if (e.key === '-') {
+        e.preventDefault();
+        handleZoomOut();
+      } else if (e.key === '0') {
+        e.preventDefault();
+        handleResetPanZoom();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   return (
     <div
@@ -833,6 +915,7 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
                   const commands = absolutize(parsePath(newD));
                   if (containerRef.current) {
                      setPathPoints(computeScreenPoints(commands, visualElement));
+                     setScreenHandleLines(computeScreenHandles(commands, visualElement));
                   }
                 }
               }
@@ -842,9 +925,9 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
       }}
     >
       <div className="absolute top-4 left-4 z-50 flex flex-col gap-1 bg-card/80 backdrop-blur border border-border rounded shadow p-1">
-        <button onClick={handleZoomIn} className="p-1 hover:bg-muted rounded text-muted-foreground"><ZoomIn className="w-4 h-4" /></button>
-        <button onClick={handleResetPanZoom} className="p-1 hover:bg-muted rounded text-muted-foreground text-[10px] font-bold">1:1</button>
-        <button onClick={handleZoomOut} className="p-1 hover:bg-muted rounded text-muted-foreground"><ZoomOut className="w-4 h-4" /></button>
+        <button onClick={handleZoomIn} className="p-1 hover:bg-muted rounded text-muted-foreground" title="Zoom avant (+)"><ZoomIn className="w-4 h-4" /></button>
+        <button onClick={handleResetPanZoom} className="p-1 hover:bg-muted rounded text-muted-foreground text-[10px] font-bold" title="Reset Zoom (0)">1:1</button>
+        <button onClick={handleZoomOut} className="p-1 hover:bg-muted rounded text-muted-foreground" title="Zoom arrière (-)"><ZoomOut className="w-4 h-4" /></button>
       </div>
 
       {/* Marquee selection rectangle */}
@@ -921,6 +1004,28 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
               />
             )}
 
+            {/* Handle lines (SVG overlay for bezier control point connections) */}
+            {mode === 'edit_path' && screenHandleLines.length > 0 && (
+              <svg
+                className="absolute inset-0 w-full h-full pointer-events-none z-15"
+                style={{ overflow: 'visible' }}
+              >
+                {screenHandleLines.map((h, i) => (
+                  <line
+                    key={i}
+                    x1={h.ax - highlightBox.left}
+                    y1={h.ay - highlightBox.top}
+                    x2={h.cx - highlightBox.left}
+                    y2={h.cy - highlightBox.top}
+                    stroke="#38bdf8"
+                    strokeWidth={1 / zoom}
+                    strokeDasharray={`${3 / zoom} ${2 / zoom}`}
+                    opacity={0.7}
+                  />
+                ))}
+              </svg>
+            )}
+
             {mode === 'edit_path' && pathPoints.map((p, i) => (
               <div
                 key={i}
@@ -928,15 +1033,18 @@ export default function SvgPreview({ doc, selectedNodes, onSelectNode, revision,
                 onPointerMove={onElPointerMove}
                 onPointerUp={onElPointerUp}
                 className={cn(
-                  "absolute w-3 h-3 bg-background border-2 rounded-full z-20 cursor-move",
-                  p.isControlPoint ? "border-sky-500 scale-75" : "border-destructive shadow-sm"
+                  "absolute z-20 cursor-move",
+                  p.isControlPoint
+                    ? "w-2.5 h-2.5 bg-sky-400 border border-sky-600 rotate-45"
+                    : "w-3 h-3 bg-background border-2 border-destructive rounded-full shadow-sm"
                 )}
                 style={{
-                  left: p.x - highlightBox.left - 6,
-                  top: p.y - highlightBox.top - 6,
+                  left: p.x - highlightBox.left - (p.isControlPoint ? 5 : 6),
+                  top: p.y - highlightBox.top - (p.isControlPoint ? 5 : 6),
                   pointerEvents: 'auto',
                   transform: `scale(${1 / zoom})`
                 }}
+                title={p.isControlPoint ? 'Poignée de contrôle' : 'Alt+clic: courber · Alt+Shift+clic: quadratique'}
               />
             ))}
 

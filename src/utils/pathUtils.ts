@@ -132,31 +132,46 @@ export function serializePath(commands: PathCommand[]): string {
 }
 
 /**
- * Identifie les points interactifs d'un tracé
+ * Identifie les points interactifs d'un tracé.
+ * Suit la position du curseur pour supporter H/V correctement.
  */
 export function getPathPoints(commands: PathCommand[]): PathPoint[] {
   const points: PathPoint[] = [];
+  let cx = 0, cy = 0;
+  let subx = 0, suby = 0;
 
   commands.forEach((cmd, cmdIndex) => {
-    const type = cmd.type; // On suppose qu'ils sont absolus ici (majuscules)
+    const type = cmd.type;
     const v = cmd.values;
 
     switch (type) {
       case 'M':
       case 'L':
       case 'T':
-        if (v.length >= 2) points.push({ x: v[0], y: v[1], cmdIndex, valIndex: 0 });
+        if (v.length >= 2) {
+          points.push({ x: v[0], y: v[1], cmdIndex, valIndex: 0 });
+          cx = v[0]; cy = v[1];
+          subx = cx; suby = cy;
+        }
         break;
       case 'H':
-        // On devrait idéalement porter la position Y précédente ici, mais pour l'instant on se concentre sur X
+        if (v.length >= 1) {
+          points.push({ x: v[0], y: cy, cmdIndex, valIndex: 0 });
+          cx = v[0];
+        }
         break;
       case 'V':
+        if (v.length >= 1) {
+          points.push({ x: cx, y: v[0], cmdIndex, valIndex: 0 });
+          cy = v[0];
+        }
         break;
       case 'C':
         if (v.length >= 6) {
           points.push({ x: v[0], y: v[1], cmdIndex, valIndex: 0, isControlPoint: true });
           points.push({ x: v[2], y: v[3], cmdIndex, valIndex: 2, isControlPoint: true });
           points.push({ x: v[4], y: v[5], cmdIndex, valIndex: 4 });
+          cx = v[4]; cy = v[5];
         }
         break;
       case 'S':
@@ -164,17 +179,183 @@ export function getPathPoints(commands: PathCommand[]): PathPoint[] {
         if (v.length >= 4) {
           points.push({ x: v[0], y: v[1], cmdIndex, valIndex: 0, isControlPoint: true });
           points.push({ x: v[2], y: v[3], cmdIndex, valIndex: 2 });
+          cx = v[2]; cy = v[3];
         }
         break;
       case 'A':
         if (v.length >= 7) {
           points.push({ x: v[5], y: v[6], cmdIndex, valIndex: 5 });
+          cx = v[5]; cy = v[6];
         }
+        break;
+      case 'Z':
+        cx = subx; cy = suby;
         break;
     }
   });
 
   return points;
+}
+
+/**
+ * Paire ancrage ↔ point de contrôle pour dessiner les poignées visuelles.
+ */
+export interface HandleLine {
+  ax: number; ay: number; // anchor
+  cx: number; cy: number; // control point
+}
+
+/**
+ * Calcule les lignes de poignées (anchor → control point) pour les commandes bézier.
+ * Fonctionne sur des commandes ABSOLUES. O(n) — pas de re-parsing.
+ */
+export function getHandleLines(commands: PathCommand[]): HandleLine[] {
+  const lines: HandleLine[] = [];
+  let curX = 0, curY = 0;
+  let subX = 0, subY = 0;
+
+  for (const cmd of commands) {
+    const v = cmd.values;
+    switch (cmd.type) {
+      case 'M':
+        curX = v[0]; curY = v[1];
+        subX = curX; subY = curY;
+        break;
+      case 'L':
+      case 'T':
+        curX = v[0]; curY = v[1];
+        break;
+      case 'H':
+        curX = v[0];
+        break;
+      case 'V':
+        curY = v[0];
+        break;
+      case 'C':
+        // cp1 is attached to previous anchor, cp2 is attached to end anchor
+        lines.push({ ax: curX,  ay: curY,  cx: v[0], cy: v[1] });
+        lines.push({ ax: v[4],  ay: v[5],  cx: v[2], cy: v[3] });
+        curX = v[4]; curY = v[5];
+        break;
+      case 'S':
+        lines.push({ ax: v[2], ay: v[3], cx: v[0], cy: v[1] });
+        curX = v[2]; curY = v[3];
+        break;
+      case 'Q':
+        // Single control point attached to both anchors
+        lines.push({ ax: curX,   ay: curY,   cx: v[0], cy: v[1] });
+        lines.push({ ax: v[2],   ay: v[3],   cx: v[0], cy: v[1] });
+        curX = v[2]; curY = v[3];
+        break;
+      case 'A':
+        curX = v[5]; curY = v[6];
+        break;
+      case 'Z':
+        curX = subX; curY = subY;
+        break;
+    }
+  }
+  return lines;
+}
+
+/**
+ * Convertit un segment L (ou H/V) en C (cubic bézier) au cmdIndex donné.
+ * Place les points de contrôle à 1/3 et 2/3 du segment.
+ * Retourne une nouvelle liste de commandes (immuable).
+ */
+export function convertSegmentToCurve(commands: PathCommand[], cmdIndex: number): PathCommand[] {
+  const cmd = commands[cmdIndex];
+  if (!cmd) return commands;
+
+  const upper = cmd.type.toUpperCase();
+  if (upper !== 'L' && upper !== 'H' && upper !== 'V') return commands;
+
+  // Find previous cursor position
+  let prevX = 0, prevY = 0;
+  for (let i = 0; i < cmdIndex; i++) {
+    const c = commands[i];
+    const t = c.type.toUpperCase();
+    if (t === 'M' || t === 'L' || t === 'T') { prevX = c.values[0]; prevY = c.values[1]; }
+    else if (t === 'H') { prevX = c.values[0]; }
+    else if (t === 'V') { prevY = c.values[0]; }
+    else if (t === 'C') { prevX = c.values[4]; prevY = c.values[5]; }
+    else if (t === 'S' || t === 'Q') { prevX = c.values[2]; prevY = c.values[3]; }
+    else if (t === 'A') { prevX = c.values[5]; prevY = c.values[6]; }
+  }
+
+  // Determine end point
+  let endX: number, endY: number;
+  if (upper === 'H') { endX = cmd.values[0]; endY = prevY; }
+  else if (upper === 'V') { endX = prevX; endY = cmd.values[0]; }
+  else { endX = cmd.values[0]; endY = cmd.values[1]; }
+
+  // Control points at 1/3 and 2/3
+  const cp1x = prevX + (endX - prevX) / 3;
+  const cp1y = prevY + (endY - prevY) / 3;
+  const cp2x = prevX + 2 * (endX - prevX) / 3;
+  const cp2y = prevY + 2 * (endY - prevY) / 3;
+
+  const newCommands = [...commands];
+  newCommands[cmdIndex] = { type: 'C', values: [cp1x, cp1y, cp2x, cp2y, endX, endY] };
+  return newCommands;
+}
+
+/**
+ * Convertit un segment C ou Q en L au cmdIndex donné (supprime les poignées).
+ * Retourne une nouvelle liste de commandes (immuable).
+ */
+export function convertSegmentToLine(commands: PathCommand[], cmdIndex: number): PathCommand[] {
+  const cmd = commands[cmdIndex];
+  if (!cmd) return commands;
+  const upper = cmd.type.toUpperCase();
+
+  const newCommands = [...commands];
+  if (upper === 'C') {
+    newCommands[cmdIndex] = { type: 'L', values: [cmd.values[4], cmd.values[5]] };
+  } else if (upper === 'Q') {
+    newCommands[cmdIndex] = { type: 'L', values: [cmd.values[2], cmd.values[3]] };
+  }
+  return newCommands;
+}
+
+/**
+ * Convertit un segment L (ou H/V) en Q (quadratique) au cmdIndex donné.
+ * Place le point de contrôle au milieu du segment, décalé perpendiculairement.
+ * Retourne une nouvelle liste de commandes (immuable).
+ */
+export function convertSegmentToQuadCurve(commands: PathCommand[], cmdIndex: number): PathCommand[] {
+  const cmd = commands[cmdIndex];
+  if (!cmd) return commands;
+
+  const upper = cmd.type.toUpperCase();
+  if (upper !== 'L' && upper !== 'H' && upper !== 'V') return commands;
+
+  // Find previous cursor position
+  let prevX = 0, prevY = 0;
+  for (let i = 0; i < cmdIndex; i++) {
+    const c = commands[i];
+    const t = c.type.toUpperCase();
+    if (t === 'M' || t === 'L' || t === 'T') { prevX = c.values[0]; prevY = c.values[1]; }
+    else if (t === 'H') { prevX = c.values[0]; }
+    else if (t === 'V') { prevY = c.values[0]; }
+    else if (t === 'C') { prevX = c.values[4]; prevY = c.values[5]; }
+    else if (t === 'S' || t === 'Q') { prevX = c.values[2]; prevY = c.values[3]; }
+    else if (t === 'A') { prevX = c.values[5]; prevY = c.values[6]; }
+  }
+
+  // Determine end point
+  let endX: number, endY: number;
+  if (upper === 'H') { endX = cmd.values[0]; endY = prevY; }
+  else if (upper === 'V') { endX = prevX; endY = cmd.values[0]; }
+  else { endX = cmd.values[0]; endY = cmd.values[1]; }
+
+  // Control point at midpoint
+  const cpx = (prevX + endX) / 2;
+  const cpy = (prevY + endY) / 2;
+
+  const newCommands = [...commands];
+  newCommands[cmdIndex] = { type: 'Q', values: [cpx, cpy, endX, endY] };
+  return newCommands;
 }
 
 /**
